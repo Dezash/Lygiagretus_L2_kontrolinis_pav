@@ -10,16 +10,23 @@ const int MAX_MESSAGES = 20;
 
 void sendData(int start)
 {
-    for (int i = start; i < start + MAX_MESSAGES + 1; i++)
+    auto rank = MPI::COMM_WORLD.Get_rank();
+    cout << "SendData " << rank << ": Started\n";
+    int i = start;
+    while(true)
     {
+        cout << "SendData " << rank << ": Sending: " << i << endl;
         int num = i;
         MPI::COMM_WORLD.Send(&num, 1, MPI::INT, 0, 0);
 
         bool isFinished = false;
         MPI::COMM_WORLD.Recv(&isFinished, 1, MPI::BOOL, 0, 0);
+        cout << "SendData " << rank << ": Response received\n";
 
         if (isFinished)
             return;
+
+        i++;
     }
 }
 
@@ -30,30 +37,46 @@ void processData()
 
     for (int i = 0; i < MAX_MESSAGES; i++)
     {
-        int num;
-        MPI::COMM_WORLD.Recv(&num, 1, MPI::INT, MPI::ANY_SOURCE, 0);
+        MPI::Status status;
+        MPI::COMM_WORLD.Probe(MPI::ANY_SOURCE, MPI::ANY_TAG, status);
+        int source = status.Get_source();
 
+        cout << "processData: Waiting for data\n";
+        int num;
+        MPI::COMM_WORLD.Recv(&num, 1, MPI::INT, source, 0);
+        cout << "processData: Sending " << num << " to: " << (num % 2 == 0 ? 3 : 4) << endl;
         MPI::COMM_WORLD.Send(&num, 1, MPI::INT, num % 2 == 0 ? 3 : 4, 0);
+        cout << "processData: Sending response to: " << source << endl;
+        bool isEnd = false;
+        MPI::COMM_WORLD.Send(&isEnd, 1, MPI::BOOL, source, 0);
     }
 
+    cout << "processData: Sending end signals\n";
     bool end = true;
     int num;
     MPI::COMM_WORLD.Recv(&num, 1, MPI::INT, 1, 0);
     MPI::COMM_WORLD.Send(&end, 1, MPI::BOOL, 1, 0);
-    MPI::COMM_WORLD.Recv(&num, 1, MPI::INT, 1, 0);
-    MPI::COMM_WORLD.Send(&end, 1, MPI::BOOL, 1, 0);
+    cout << "processData: End signal sent to process 1\n";
+    MPI::COMM_WORLD.Recv(&num, 1, MPI::INT, 2, 0);
+    MPI::COMM_WORLD.Send(&end, 1, MPI::BOOL, 2, 0);
+    cout << "processData: End signal sent to process 2\n";
 
     MPI::COMM_WORLD.Send(NULL, 0, MPI::BOOL, 3, 1);
+    cout << "processData: End signal sent to process 3\n";
     MPI::COMM_WORLD.Send(NULL, 0, MPI::BOOL, 4, 1);
+    cout << "processData: End signal sent to process 4\n";
+    cout << "processData: END\n";
 }
 
 
 void finlizeData()
 {
+    auto rank = MPI::COMM_WORLD.Get_rank();
     int nums[20];
     int count = 0;
     for (int i = 0; i < MAX_MESSAGES; i++)
     {
+        cout << "finlizeData " << rank << ": Waiting...\n";
         MPI::Status status;
         MPI::COMM_WORLD.Probe(0, MPI::ANY_TAG, status);
         int tag = status.Get_tag();
@@ -61,15 +84,16 @@ void finlizeData()
         if (tag == 0)
         {
             MPI::COMM_WORLD.Recv(&nums[count++], 1, MPI::INT, 0, tag);
+            cout << "finlizeData " << rank << ": Data received: " << nums[count - 1] << endl;
         }
         else
         {
             MPI::COMM_WORLD.Recv(NULL, 0, MPI::BOOL, 0, tag);
+            cout << "finlizeData " << rank << ": END\n";
             break;
         }
     }
 
-    auto rank = MPI::COMM_WORLD.Get_rank();
     for (int i = 0; i < count; i++)
     {
         cout << "Procesas #" << rank << ": " << nums[i] << '\n';
@@ -96,12 +120,13 @@ int main()
         sendData(11);
         break;
     case 3:
+        finlizeData();
+        break;
     case 4:
-        // Worker thread
         finlizeData();
         break;
     }
 
-
     MPI::Finalize();
+    cout << "Done\n";
 }
